@@ -5,7 +5,7 @@ load_dotenv()
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
-LLM_MODEL = os.getenv("LLM_MODEL", "anthropic/claude-sonnet-4-20250514")
+LLM_MODEL = os.getenv("LLM_MODEL", "anthropic/claude-sonnet-4")
 TDP_TTL_DAYS = int(os.getenv("TDP_TTL_DAYS", "90"))
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
