@@ -126,7 +126,7 @@ Be specific. Trace every need back to evidence from the profiles."""
         system_prompt=SYSTEM_PROMPT,
         user_prompt=user_prompt,
         temperature=0.3,
-        max_tokens=4096,
+        max_tokens=6000,
     )
 
     return {

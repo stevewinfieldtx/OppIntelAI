@@ -105,7 +105,7 @@ Be specific and evidence-based. No generic filler. Every claim should be grounde
         system_prompt=SYSTEM_PROMPT,
         user_prompt=user_prompt,
         use_web_search=True,
-        max_tokens=4096,
+        max_tokens=6000,
     )
 
     # Store in cache using name (or URL as fallback)

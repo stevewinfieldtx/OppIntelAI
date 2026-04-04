@@ -134,7 +134,7 @@ Every element must reference specific details from the intelligence profiles. Th
         system_prompt=SYSTEM_PROMPT,
         user_prompt=user_prompt,
         temperature=0.4,
-        max_tokens=5000,
+        max_tokens=8000,
     )
 
     return {

@@ -99,7 +99,7 @@ Focus on information that would help a B2B sales representative have an informed
         system_prompt=SYSTEM_PROMPT,
         user_prompt=user_prompt,
         use_web_search=True,
-        max_tokens=4096,
+        max_tokens=5000,
     )
 
     # Store in cache

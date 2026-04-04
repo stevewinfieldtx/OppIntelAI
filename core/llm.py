@@ -34,38 +34,92 @@ def _strip_code_fences(text: str) -> str:
 
 def _repair_json(text: str) -> str:
     """
-    Attempt to repair common JSON issues from LLM output.
-    Handles: trailing commas, missing commas between properties,
-    single quotes, unescaped newlines in strings, truncated output.
+    Repair truncated or malformed JSON from LLM output.
+
+    Uses a stack to track open structures so closing brackets/braces are
+    inserted in the correct order. Also handles:
+    - Unterminated strings (the most common truncation failure)
+    - Trailing commas
+    - Missing commas between properties
     """
+    # ── pre-clean ──────────────────────────────────────────────────────────
     # Remove trailing commas before } or ]
     text = re.sub(r',\s*([}\]])', r'\1', text)
-
-    # Fix missing commas between properties: }\n{ or "\n"
-    # Pattern: end of value followed by newline and start of new key
+    # Fix missing commas between adjacent quoted strings on separate lines
     text = re.sub(r'"\s*\n\s*"', '",\n"', text)
-
-    # Fix missing commas between array elements: }\n{
+    # Fix missing commas between adjacent objects in an array
     text = re.sub(r'}\s*\n\s*{', '},\n{', text)
-
-    # Fix missing commas after ] or } followed by "
+    # Fix missing commas after ] or } before a new key
     text = re.sub(r'([\]}])\s*\n\s*"', r'\1,\n"', text)
 
-    # If JSON is truncated (no closing }), try to close it
-    # Count unmatched braces
-    open_braces = text.count('{') - text.count('}')
-    open_brackets = text.count('[') - text.count(']')
+    # ── stack-based structural analysis ────────────────────────────────────
+    stack = []       # tracks '{' and '[' that are open
+    in_string = False
+    escaped = False
 
-    if open_braces > 0 or open_brackets > 0:
-        # Try to find a reasonable truncation point
-        # Remove the last incomplete property if we can
-        last_comma = text.rfind(',')
-        if last_comma > len(text) * 0.8:  # Only if near the end
-            text = text[:last_comma]
+    for ch in text:
+        if escaped:
+            escaped = False
+            continue
+        if ch == '\\' and in_string:
+            escaped = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if not in_string:
+            if ch in ('{', '['):
+                stack.append(ch)
+            elif ch == '}' and stack and stack[-1] == '{':
+                stack.pop()
+            elif ch == ']' and stack and stack[-1] == '[':
+                stack.pop()
 
-        # Close any open structures
-        text += ']' * open_brackets
-        text += '}' * open_braces
+    # Nothing open, nothing in a string → text is structurally complete
+    if not stack and not in_string:
+        return text
+
+    # ── close unterminated string ───────────────────────────────────────────
+    if in_string:
+        text = text.rstrip()
+        if text.endswith('\\'):
+            text = text[:-1]
+        text += '"'
+
+    # ── strip dangling incomplete key or opener ─────────────────────────────
+    # e.g. `..."key":` or `..."key": {` at the very end with no value
+    text = re.sub(r',?\s*"[^"]*"\s*:\s*[\[{]?\s*$', '', text)
+    # e.g. a just-closed string that has no colon after it (orphaned key)
+    text = re.sub(r',\s*"[^"]*"\s*$', '', text)
+    # Strip orphaned trailing comma
+    text = text.rstrip().rstrip(',')
+
+    # ── close open structures in reverse stack order ───────────────────────
+    # Re-scan after cleanup in case we removed some openers
+    stack2 = []
+    in_str2 = False
+    esc2 = False
+    for ch in text:
+        if esc2:
+            esc2 = False
+            continue
+        if ch == '\\' and in_str2:
+            esc2 = True
+            continue
+        if ch == '"':
+            in_str2 = not in_str2
+            continue
+        if not in_str2:
+            if ch in ('{', '['):
+                stack2.append(ch)
+            elif ch == '}' and stack2 and stack2[-1] == '{':
+                stack2.pop()
+            elif ch == ']' and stack2 and stack2[-1] == '[':
+                stack2.pop()
+
+    closer = {'{': '}', '[': ']'}
+    for opener in reversed(stack2):
+        text += closer[opener]
 
     return text
 

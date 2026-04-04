@@ -113,7 +113,7 @@ Be thorough but honest. Flag anything you couldn't verify. A sales rep needs to 
         system_prompt=SYSTEM_PROMPT,
         user_prompt=user_prompt,
         use_web_search=True,
-        max_tokens=4096,
+        max_tokens=6000,
     )
 
     # Store in cache
