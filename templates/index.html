@@ -184,7 +184,7 @@ function setMod(m){
 function ss(id,s){const e=document.getElementById(id);if(e){e.classList.remove('run','ok','err');if(s)e.classList.add(s);}}
 function stab(t){document.querySelectorAll('.tb').forEach(b=>b.classList.remove('a'));document.querySelectorAll('.tp').forEach(p=>p.classList.remove('a'));document.querySelector(`.tb[data-t="${t}"]`)?.classList.add('a');document.getElementById('p-'+t)?.classList.add('a');}
 
-async function goH(){
+function goH(){
     const su=document.getElementById('h-su').value.trim();
     const sn=document.getElementById('h-sn').value.trim();
     const cu=document.getElementById('h-cu').value.trim();
@@ -195,21 +195,41 @@ async function goH(){
     document.getElementById('bHt').textContent='⏳ Hydrating...';
     document.getElementById('ppH').classList.add('active');
     document.getElementById('res').classList.remove('active');
-    const stg=['hs-sol','hs-ind','hs-cus','hs-nid','hs-que'];
-    stg.forEach(s=>ss(s,''));let i=0;
-    const tm=setInterval(()=>{if(i<stg.length){if(i>0)ss(stg[i-1],'ok');ss(stg[i],'run');i++;}},8000);
-    try{
-        ss('hs-sol','run');
-        const r=await fetch('/api/v1/hydrate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({solution_name:sn||su,solution_url:su,customer_url:cu,industry:ind,contact_title:ct})});
-        clearInterval(tm);
-        if(!r.ok)throw new Error(`HTTP ${r.status}: ${await r.text()}`);
-        D=await r.json();lastMode='h';stg.forEach(s=>ss(s,'ok'));
-        renderH(D);document.getElementById('res').classList.add('active');
-    }catch(e){clearInterval(tm);stg.forEach(s=>{const el=document.getElementById(s);if(el&&el.classList.contains('run'))ss(s,'err');});alert('Failed: '+e.message);
-    }finally{b.disabled=false;document.getElementById('bHt').textContent='⚡ Hydrate This Lead';}
+    const stgMap={solution:'hs-sol',industry:'hs-ind',customer:'hs-cus',need_id:'hs-nid',questions:'hs-que'};
+    const stgAll=['hs-sol','hs-ind','hs-cus','hs-nid','hs-que'];
+    stgAll.forEach(s=>ss(s,''));
+
+    const params=new URLSearchParams({solution_url:su,solution_name:sn||su,customer_url:cu,industry:ind,contact_title:ct});
+    const es=new EventSource(`/api/v1/hydrate/stream?${params}`);
+
+    es.onmessage=function(e){
+        let msg;try{msg=JSON.parse(e.data);}catch{return;}
+        if(msg.type==='progress'){
+            const el=stgMap[msg.stage];
+            if(el){if(msg.status==='running')ss(el,'run');else if(msg.status==='complete')ss(el,'ok');else if(msg.status==='failed')ss(el,'err');}
+        }else if(msg.type==='result'){
+            es.close();
+            D=msg.data;lastMode='h';
+            stgAll.forEach(s=>ss(s,'ok'));
+            renderH(D);document.getElementById('res').classList.add('active');
+            b.disabled=false;document.getElementById('bHt').textContent='⚡ Hydrate This Lead';
+        }else if(msg.type==='error'){
+            es.close();
+            stgAll.forEach(s=>{const el=document.getElementById(s);if(el&&el.classList.contains('run'))ss(s,'err');});
+            alert('Hydration failed: '+(msg.detail||'Unknown error'));
+            b.disabled=false;document.getElementById('bHt').textContent='⚡ Hydrate This Lead';
+        }
+    };
+    es.onerror=function(){
+        if(es.readyState===EventSource.CLOSED)return;
+        es.close();
+        stgAll.forEach(s=>{const el=document.getElementById(s);if(el&&el.classList.contains('run'))ss(s,'err');});
+        alert('Connection lost. Please try again.');
+        b.disabled=false;document.getElementById('bHt').textContent='⚡ Hydrate This Lead';
+    };
 }
 
-async function goP(){
+function goP(){
     const su=document.getElementById('p-su').value.trim();
     const sn=document.getElementById('p-sn').value.trim();
     const v=document.getElementById('p-v').value.trim();
@@ -220,18 +240,38 @@ async function goP(){
     document.getElementById('bPt').textContent='⏳ Prospecting...';
     document.getElementById('ppP').classList.add('active');
     document.getElementById('res').classList.remove('active');
-    const stg=['ps-sol','ps-ver','ps-ind','ps-met','ps-pro','ps-hyd'];
-    stg.forEach(s=>ss(s,''));let i=0;
-    const tm=setInterval(()=>{if(i<stg.length){if(i>0)ss(stg[i-1],'ok');ss(stg[i],'run');i++;}},12000);
-    try{
-        ss('ps-sol','run');
-        const r=await fetch('/api/v1/prospect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({solution_name:sn||su,solution_url:su,target_vertical:v,geo_seed:g,account_volume:n})});
-        clearInterval(tm);
-        if(!r.ok)throw new Error(`HTTP ${r.status}: ${await r.text()}`);
-        D=await r.json();lastMode='p';stg.forEach(s=>ss(s,'ok'));
-        renderP(D);document.getElementById('res').classList.add('active');
-    }catch(e){clearInterval(tm);stg.forEach(s=>{const el=document.getElementById(s);if(el&&el.classList.contains('run'))ss(s,'err');});alert('Failed: '+e.message);
-    }finally{b.disabled=false;document.getElementById('bPt').textContent='🔍 Find & Hydrate Leads';}
+    const stgMap={solution:'ps-sol',vertical:'ps-ver',industry:'ps-ind',metro:'ps-met',prospecting:'ps-pro',hydrating:'ps-hyd'};
+    const stgAll=['ps-sol','ps-ver','ps-ind','ps-met','ps-pro','ps-hyd'];
+    stgAll.forEach(s=>ss(s,''));
+
+    const params=new URLSearchParams({solution_url:su,solution_name:sn||su,target_vertical:v,geo_seed:g,account_volume:n});
+    const es=new EventSource(`/api/v1/prospect/stream?${params}`);
+
+    es.onmessage=function(e){
+        let msg;try{msg=JSON.parse(e.data);}catch{return;}
+        if(msg.type==='progress'){
+            const el=stgMap[msg.stage];
+            if(el){if(msg.status==='running')ss(el,'run');else if(msg.status==='complete')ss(el,'ok');else if(msg.status==='failed')ss(el,'err');}
+        }else if(msg.type==='result'){
+            es.close();
+            D=msg.data;lastMode='p';
+            stgAll.forEach(s=>ss(s,'ok'));
+            renderP(D);document.getElementById('res').classList.add('active');
+            b.disabled=false;document.getElementById('bPt').textContent='🔍 Find & Hydrate Leads';
+        }else if(msg.type==='error'){
+            es.close();
+            stgAll.forEach(s=>{const el=document.getElementById(s);if(el&&el.classList.contains('run'))ss(s,'err');});
+            alert('Prospecting failed: '+(msg.detail||'Unknown error'));
+            b.disabled=false;document.getElementById('bPt').textContent='🔍 Find & Hydrate Leads';
+        }
+    };
+    es.onerror=function(){
+        if(es.readyState===EventSource.CLOSED)return;
+        es.close();
+        stgAll.forEach(s=>{const el=document.getElementById(s);if(el&&el.classList.contains('run'))ss(s,'err');});
+        alert('Connection lost. Please try again.');
+        b.disabled=false;document.getElementById('bPt').textContent='🔍 Find & Hydrate Leads';
+    };
 }
 
 function mkTabs(tabs,first){

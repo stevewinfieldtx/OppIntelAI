@@ -2,14 +2,16 @@
 OppIntelAI API Routes
 Unified endpoints for Prospector, Hydrator, Fit Check, Render, and ClearSignals proxy.
 """
+import asyncio
 import hashlib
+import json
 import logging
 import time
 import uuid
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -97,6 +99,70 @@ async def hydrate_lead(request: HydrationRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# === Module 2: Hydrator — SSE Streaming ===
+
+@router.get("/hydrate/stream", summary="Hydrate an inbound lead with real-time progress")
+async def hydrate_stream(
+    solution_url: str,
+    customer_url: str,
+    solution_name: str = "",
+    industry: str = "",
+    contact_title: str = "",
+):
+    """
+    SSE version of /hydrate. Streams progress events as each agent completes,
+    then delivers the full result. Keeps the HTTP connection alive for long runs.
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def callback(data: dict):
+        await queue.put({"type": "progress", **data})
+
+    async def run_pipeline():
+        try:
+            result = await hydrate(
+                solution_url=solution_url,
+                solution_name=solution_name,
+                customer_url=customer_url,
+                industry_name=industry,
+                contact_title=contact_title,
+                callback=callback,
+            )
+            await queue.put({"type": "result", "data": result})
+        except Exception as e:
+            logger.error(f"Hydration SSE error: {e}")
+            await queue.put({"type": "error", "detail": str(e)})
+
+    async def generate():
+        task = asyncio.create_task(run_pipeline())
+        try:
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=20.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {json.dumps(item)}\n\n"
+                if item.get("type") in ("result", "error"):
+                    break
+        finally:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 # === Module 1: Prospector (Proactive) ===
 
 @router.post("/prospect", summary="Proactively find and hydrate leads")
@@ -118,6 +184,72 @@ async def prospect_leads(request: ProspectorRequest):
     except Exception as e:
         logger.error(f"Prospecting error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# === Module 1: Prospector — SSE Streaming ===
+
+@router.get("/prospect/stream", summary="Proactively find leads with real-time progress")
+async def prospect_stream(
+    solution_url: str,
+    solution_name: str = "",
+    target_vertical: str = "",
+    geo_seed: str = "",
+    account_volume: int = 10,
+    hydrate_results: bool = True,
+):
+    """
+    SSE version of /prospect. Streams progress events through all pipeline stages,
+    then delivers the full result. Essential for long prospecting runs.
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def callback(data: dict):
+        await queue.put({"type": "progress", **data})
+
+    async def run_pipeline():
+        try:
+            result = await prospect(
+                solution_url=solution_url,
+                solution_name=solution_name,
+                target_vertical=target_vertical,
+                geo_seed=geo_seed,
+                account_volume=max(1, min(account_volume, 50)),
+                hydrate_results=hydrate_results,
+                callback=callback,
+            )
+            await queue.put({"type": "result", "data": result})
+        except Exception as e:
+            logger.error(f"Prospector SSE error: {e}")
+            await queue.put({"type": "error", "detail": str(e)})
+
+    async def generate():
+        task = asyncio.create_task(run_pipeline())
+        try:
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=20.0)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {json.dumps(item)}\n\n"
+                if item.get("type") in ("result", "error"):
+                    break
+        finally:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 # === Fit Check (Prospect-Facing Widget) ===

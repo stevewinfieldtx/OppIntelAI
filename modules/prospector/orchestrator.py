@@ -3,6 +3,7 @@ Prospector Orchestrator (Module 1: Proactive)
 Takes a solution + optional vertical + optional geography and goes hunting.
 Finds prospects, then hydrates each one through the shared intelligence layer.
 """
+import asyncio
 import logging
 import time
 from typing import Optional
@@ -126,61 +127,77 @@ async def prospect(
         await _progress("prospecting", "complete",
             f"Found {len(prospects_list)} prospects")
 
-        # === STAGE 5: Optional Hydration of each prospect ===
+        # === STAGE 5: Optional Hydration of each prospect (parallel, max 3 at once) ===
         hydrated_prospects = []
         if hydrate_results and prospects_list:
-            for i, prospect in enumerate(prospects_list):
-                prospect_url = prospect.get("website", "")
-                prospect_name = prospect.get("name", f"Prospect {i+1}")
+            await _progress("hydrating", "running",
+                f"Hydrating {len(prospects_list)} prospects in parallel...")
 
-                await _progress("hydrating", "running",
-                    f"Hydrating {i+1}/{len(prospects_list)}: {prospect_name}...")
+            sem = asyncio.Semaphore(3)
 
-                try:
-                    # Build Customer TDP for this prospect (shared/cached)
-                    if prospect_url:
-                        customer_tdp = await customer_agent.run(
-                            customer_url=prospect_url,
-                            industry_context=selected_vertical,
+            async def hydrate_one(prospect_item: dict) -> dict:
+                prospect_url = prospect_item.get("website", "")
+                prospect_name = prospect_item.get("name", "prospect")
+                async with sem:
+                    try:
+                        if prospect_url:
+                            c_tdp = await customer_agent.run(
+                                customer_url=prospect_url,
+                                industry_context=selected_vertical,
+                            )
+                        else:
+                            c_tdp = {"data": prospect_item}
+
+                        n_analysis = await need_id_agent.run(
+                            solution_tdp=solution_tdp,
+                            industry_tdp=industry_tdp,
+                            customer_tdp=c_tdp,
                         )
-                        total_tokens += customer_tdp.get("token_cost", 0)
-                        if customer_tdp.get("from_cache"):
-                            cache_hits.append(f"customer:{prospect_name}")
-                    else:
-                        # No URL — use prospect data as-is
-                        customer_tdp = {"data": prospect}
 
-                    # Need ID synthesis
-                    need_analysis = await need_id_agent.run(
-                        solution_tdp=solution_tdp,
-                        industry_tdp=industry_tdp,
-                        customer_tdp=customer_tdp,
-                    )
-                    total_tokens += need_analysis.get("token_cost", 0)
+                        qs = await questions_agent.run(
+                            solution_tdp=solution_tdp,
+                            industry_tdp=industry_tdp,
+                            customer_tdp=c_tdp,
+                            need_analysis=n_analysis,
+                            contact_title=prospect_item.get("contact_title", ""),
+                        )
 
-                    # Questions synthesis
-                    questions = await questions_agent.run(
-                        solution_tdp=solution_tdp,
-                        industry_tdp=industry_tdp,
-                        customer_tdp=customer_tdp,
-                        need_analysis=need_analysis,
-                        contact_title=prospect.get("contact_title", ""),
-                    )
-                    total_tokens += questions.get("token_cost", 0)
+                        tokens = (
+                            c_tdp.get("token_cost", 0)
+                            + n_analysis.get("token_cost", 0)
+                            + qs.get("token_cost", 0)
+                        )
+                        cache = c_tdp.get("from_cache", False)
+                        return {
+                            "prospect": prospect_item,
+                            "customer_tdp": c_tdp.get("data", {}),
+                            "need_analysis": n_analysis.get("data", {}),
+                            "conversation_toolkit": qs.get("data", {}),
+                            "_tokens": tokens,
+                            "_cache": cache,
+                            "_name": prospect_name,
+                        }
+                    except Exception as e:
+                        logger.warning(f"Failed to hydrate {prospect_name}: {e}")
+                        return {
+                            "prospect": prospect_item,
+                            "hydration_error": str(e),
+                            "_tokens": 0,
+                            "_cache": False,
+                            "_name": prospect_name,
+                        }
 
-                    hydrated_prospects.append({
-                        "prospect": prospect,
-                        "customer_tdp": customer_tdp.get("data", {}),
-                        "need_analysis": need_analysis.get("data", {}),
-                        "conversation_toolkit": questions.get("data", {}),
-                    })
+            results = await asyncio.gather(
+                *[hydrate_one(p) for p in prospects_list]
+            )
 
-                except Exception as e:
-                    logger.warning(f"Failed to hydrate {prospect_name}: {e}")
-                    hydrated_prospects.append({
-                        "prospect": prospect,
-                        "hydration_error": str(e),
-                    })
+            for r in results:
+                total_tokens += r.pop("_tokens", 0)
+                if r.pop("_cache", False):
+                    cache_hits.append(f"customer:{r.pop('_name', '')}")
+                else:
+                    r.pop("_name", None)
+                hydrated_prospects.append(r)
 
             await _progress("hydrating", "complete",
                 f"Hydrated {len(hydrated_prospects)} prospects")
