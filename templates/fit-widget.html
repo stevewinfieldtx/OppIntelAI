@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solution Fit Check | OppIntelAI</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+    --bg:#0c0e12;--srf:#14171e;--srf2:#1a1e27;--inp:#10131a;
+    --bdr:#252a35;--bdr2:#333a48;
+    --t1:#e8eaf0;--t2:#9ba3b5;--t3:#5e6578;
+    --cyan:#3ecfcf;--coral:#f06449;--amber:#f0a946;--green:#42d392;
+    --grad:linear-gradient(135deg,#3ecfcf 0%,#6366f1 100%);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--t1);font-family:'DM Sans',sans-serif;min-height:100vh}
+.c{max-width:680px;margin:0 auto;padding:48px 24px 64px}
+.hdr{text-align:center;margin-bottom:40px}
+.ey{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--cyan);margin-bottom:12px}
+h1{font-family:'Instrument Serif',serif;font-size:clamp(32px,5vw,44px);font-weight:400;line-height:1.15;color:var(--t1);margin-bottom:12px}
+h1 em{font-style:italic;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.sub{font-size:15px;color:var(--t2);line-height:1.6;max-width:520px;margin:0 auto}
+.isec{background:var(--srf);border:1px solid var(--bdr);border-radius:14px;padding:28px;margin-bottom:24px}
+.ig{margin-bottom:20px}
+.ig label{display:block;font-size:12px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;color:var(--t2);margin-bottom:8px}
+.ig input{width:100%;background:var(--inp);border:1px solid var(--bdr);border-radius:8px;padding:14px 16px;color:var(--t1);font-size:15px;font-family:'DM Sans',sans-serif;transition:border-color .2s}
+.ig input:focus{outline:none;border-color:var(--cyan)}
+.ig input::placeholder{color:var(--t3)}
+.ih{display:block;font-size:12px;color:var(--t3);margin-top:6px}
+.btn{display:block;width:100%;padding:16px;border:none;border-radius:10px;font-size:15px;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;transition:all .2s;text-align:center}
+.btn-primary,.btn:not(.btn-outline){background:var(--grad);color:#fff}
+.btn:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(62,207,207,0.2)}
+.btn:disabled{opacity:0.5;cursor:not-allowed;transform:none;box-shadow:none}
+.prog{display:none;text-align:center;padding:48px 24px}
+.spin{width:48px;height:48px;border:3px solid var(--bdr);border-top-color:var(--cyan);border-radius:50%;animation:sp .8s linear infinite;margin:0 auto 20px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.step{font-size:16px;font-weight:500;color:var(--t1);margin-bottom:8px}
+.detail{font-size:13px;color:var(--t3)}
+.result{display:none}
+.score-card{background:var(--srf);border:1px solid var(--bdr);border-radius:14px;padding:32px;text-align:center;margin-bottom:24px}
+.score-ring{width:120px;height:120px;margin:0 auto 16px;position:relative}
+.score-ring svg{transform:rotate(-90deg)}
+.score-ring .bg{fill:none;stroke:var(--bdr);stroke-width:8}
+.score-ring .fg{fill:none;stroke-width:8;stroke-linecap:round;transition:stroke-dashoffset 1.5s ease}
+.score-num{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-family:'Instrument Serif',serif;font-size:36px;font-weight:400}
+.score-label{font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+.score-headline{font-size:15px;color:var(--t2);line-height:1.5}
+.sec{background:var(--srf);border:1px solid var(--bdr);border-radius:14px;padding:24px;margin-bottom:16px}
+.sec-title{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--t3);margin-bottom:16px}
+.fit-point{padding:12px 0;border-bottom:1px solid var(--bdr)}
+.fit-point:last-child{border-bottom:none}
+.fit-point .fp-cap{font-weight:600;color:var(--green);margin-bottom:4px;font-size:14px}
+.fit-point .fp-why{font-size:13px;color:var(--t2);line-height:1.6}
+.concern{padding:12px 0;border-bottom:1px solid var(--bdr)}
+.concern:last-child{border-bottom:none}
+.concern .c-head{font-weight:500;color:var(--amber);margin-bottom:4px}
+.concern .c-mit{font-size:13px;color:var(--t2);line-height:1.6}
+.next{display:flex;align-items:flex-start;gap:10px;padding:8px 0}
+.next .dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);margin-top:7px;flex-shrink:0}
+.next p{font-size:14px;color:var(--t2);line-height:1.6}
+.convo{background:var(--inp);border:1px solid var(--bdr);border-radius:10px;padding:20px;margin-top:16px;font-size:15px;color:var(--t1);font-style:italic;line-height:1.6;text-align:center}
+.cta-row{display:flex;gap:12px;margin-top:24px}
+.cta-row .btn{flex:1}
+.cta-row .btn-outline{background:transparent;border:2px solid var(--cyan);color:var(--cyan)}
+.cta-row .btn-primary{background:linear-gradient(135deg,var(--coral),#e05545)}
+.pwrd{text-align:center;margin-top:32px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:2px;color:var(--t3)}
+.pwrd a{color:var(--cyan);text-decoration:none}
+[data-section]{position:relative}
+</style>
+</head>
+<body>
+<div class="c">
+<div class="hdr">
+<div class="ey">Personalized</div>
+<h1>See How <em id="sol-title">This Solution</em> Fits Your Business</h1>
+<p class="sub">Enter your company website and we'll run a real-time intelligence analysis — not a template, not a dropdown.</p>
+</div>
+
+<div class="isec" id="form-section">
+<div class="ig">
+<label>Your Company Website</label>
+<input type="text" id="prospect-url" placeholder="https://yourcompany.com"/>
+<span class="ih">We'll research your business to provide a personalized analysis</span>
+</div>
+<input type="hidden" id="solution-url" value=""/>
+<button class="btn" id="go-btn" onclick="runFitCheck()">
+<span id="btn-text">Show Me the Fit</span>
+</button>
+</div>
+
+<div class="prog" id="progress">
+<div class="spin"></div>
+<div class="step" id="prog-step">Researching your company...</div>
+<div class="detail" id="prog-detail">This takes 30-60 seconds — we're doing real research, not serving a template.</div>
+</div>
+
+<div class="result" id="result"></div>
+
+<div class="pwrd">Powered by <a href="https://oppintelai.com" target="_blank">OppIntelAI</a></div>
+</div>
+
+<script>
+const CONFIG = {
+    solutionUrl: '',
+    solutionName: '',
+    apiBase: '',
+    ctaRequestQuote: '',
+    ctaDemo: '',
+};
+
+const params = new URLSearchParams(window.location.search);
+if (params.get('solution')) CONFIG.solutionUrl = params.get('solution');
+if (params.get('name')) CONFIG.solutionName = params.get('name');
+if (params.get('api')) CONFIG.apiBase = params.get('api');
+if (params.get('quote_url')) CONFIG.ctaRequestQuote = params.get('quote_url');
+if (params.get('demo_url')) CONFIG.ctaDemo = params.get('demo_url');
+
+if (!CONFIG.apiBase) CONFIG.apiBase = window.location.origin;
+
+if (CONFIG.solutionName) {
+    document.getElementById('sol-title').textContent = CONFIG.solutionName;
+}
+if (CONFIG.solutionUrl) {
+    document.getElementById('solution-url').value = CONFIG.solutionUrl;
+}
+
+let sessionId = null;
+let startTime = null;
+let sectionsViewed = new Set();
+let heartbeatInterval = null;
+
+function trackSection(sectionName) {
+    sectionsViewed.add(sectionName);
+}
+
+function trackCTA(ctaType) {
+    sendEngagement(ctaType);
+}
+
+function sendEngagement(cta = '') {
+    if (!sessionId) return;
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    fetch(CONFIG.apiBase + '/api/v1/fit-check/engagement', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            session_id: sessionId,
+            sections_viewed: Array.from(sectionsViewed),
+            time_on_page_seconds: elapsed,
+            cta_clicked: cta,
+        }),
+    }).catch(function(){});
+}
+
+function sendHeartbeat() {
+    sendEngagement();
+}
+
+function setupSectionTracking() {
+    var observer = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+            if (entry.isIntersecting) {
+                trackSection(entry.target.dataset.section);
+            }
+        });
+    }, {threshold: 0.5});
+
+    document.querySelectorAll('[data-section]').forEach(function(el) { observer.observe(el); });
+}
+
+var STEPS = [
+    {step: 'Researching your company...', detail: 'Scanning website, tech stack, and business model'},
+    {step: 'Loading solution intelligence...', detail: 'Pulling cached vendor analysis'},
+    {step: 'Running fit synthesis...', detail: 'Comparing capabilities against your specific needs'},
+    {step: 'Generating your personalized report...', detail: 'Almost there — finalizing recommendations'},
+];
+
+function animateProgress() {
+    var i = 0;
+    var interval = setInterval(function() {
+        i++;
+        if (i < STEPS.length) {
+            document.getElementById('prog-step').textContent = STEPS[i].step;
+            document.getElementById('prog-detail').textContent = STEPS[i].detail;
+        } else {
+            clearInterval(interval);
+        }
+    }, 12000);
+    return interval;
+}
+
+async function runFitCheck() {
+    var prospectUrl = document.getElementById('prospect-url').value.trim();
+    var solutionUrl = CONFIG.solutionUrl || document.getElementById('solution-url').value.trim();
+
+    if (!prospectUrl) {
+        document.getElementById('prospect-url').style.borderColor = 'var(--coral)';
+        return;
+    }
+    if (!solutionUrl) {
+        alert('Solution URL not configured. Contact the vendor.');
+        return;
+    }
+
+    var url = prospectUrl;
+    if (!url.startsWith('http')) url = 'https://' + url;
+
+    document.getElementById('form-section').style.display = 'none';
+    document.getElementById('progress').style.display = 'block';
+    document.getElementById('result').style.display = 'none';
+
+    var progressInterval = animateProgress();
+
+    try {
+        var resp = await fetch(CONFIG.apiBase + '/api/v1/fit-check', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                prospect_url: url,
+                solution_url: solutionUrl,
+                solution_name: CONFIG.solutionName,
+            }),
+        });
+
+        clearInterval(progressInterval);
+
+        if (!resp.ok) {
+            throw new Error('Server error: ' + resp.status);
+        }
+
+        var data = await resp.json();
+        sessionId = data.session_id;
+        startTime = Date.now();
+
+        heartbeatInterval = setInterval(sendHeartbeat, 30000);
+
+        renderResults(data.fit_analysis, data.meta);
+    } catch (err) {
+        clearInterval(progressInterval);
+        document.getElementById('progress').style.display = 'none';
+        document.getElementById('form-section').style.display = 'block';
+        var btn = document.getElementById('go-btn');
+        btn.innerHTML = '<span style="color:var(--coral)">Error — try again</span>';
+        setTimeout(function() { btn.innerHTML = '<span>Show Me the Fit</span>'; }, 3000);
+    }
+}
+
+function getScoreColor(score) {
+    if (score >= 80) return 'var(--green)';
+    if (score >= 60) return 'var(--cyan)';
+    if (score >= 40) return 'var(--amber)';
+    return 'var(--coral)';
+}
+
+function getLevelLabel(level) {
+    var map = {
+        strong_fit: 'Strong Fit', strong: 'Strong Fit',
+        good_fit: 'Good Fit', good: 'Good Fit',
+        moderate_fit: 'Moderate Fit', partial: 'Partial Fit',
+        weak_fit: 'Weak Fit', exploratory: 'Exploratory',
+        poor_fit: 'Poor Fit',
+    };
+    return map[level] || level;
+}
+
+function renderResults(fit, meta) {
+    document.getElementById('progress').style.display = 'none';
+    document.getElementById('result').style.display = 'block';
+
+    var score = fit.fit_score || 0;
+    var color = getScoreColor(score);
+    var circumference = 2 * Math.PI * 52;
+    var offset = circumference - (score / 100) * circumference;
+
+    var html = '';
+
+    // Score card
+    html += '<div class="score-card" data-section="score">' +
+        '<div class="score-ring">' +
+        '<svg viewBox="0 0 120 120" width="120" height="120">' +
+        '<circle class="bg" cx="60" cy="60" r="52"/>' +
+        '<circle class="fg" cx="60" cy="60" r="52" stroke="' + color + '" stroke-dasharray="' + circumference + '" stroke-dashoffset="' + offset + '"/>' +
+        '</svg>' +
+        '<div class="score-num" style="color:' + color + '">' + score + '</div>' +
+        '</div>' +
+        '<div class="score-label" style="color:' + color + '">' + getLevelLabel(fit.fit_level) + '</div>' +
+        '<div class="score-headline">' + (fit.headline || '') + '</div>' +
+        '</div>';
+
+    // Summary
+    var summary = fit.fit_summary || fit.business_context || '';
+    if (summary) {
+        html += '<div class="sec" data-section="summary">' +
+            '<div class="sec-title">Executive Summary</div>' +
+            '<p style="font-size:14px;color:var(--t2);line-height:1.7">' + summary + '</p></div>';
+    }
+
+    // Fit points (handle both schema shapes)
+    var points = fit.strong_fit_points || fit.fit_points || [];
+    if (points.length) {
+        html += '<div class="sec" data-section="fit_points"><div class="sec-title">Where It Fits</div>';
+        points.forEach(function(fp) {
+            var label = fp.point || fp.area || '';
+            var desc = fp.why || fp.relevance || '';
+            if (fp.solution_capability) desc += ' ' + fp.solution_capability;
+            html += '<div class="fit-point"><div class="fp-cap">' + label + '</div><div class="fp-why">' + desc + '</div></div>';
+        });
+        html += '</div>';
+    }
+
+    // Concerns
+    var concerns = fit.potential_concerns || [];
+    if (concerns.length) {
+        html += '<div class="sec" data-section="concerns"><div class="sec-title">Things to Consider</div>';
+        concerns.forEach(function(c) {
+            html += '<div class="concern"><div class="c-head">' + c.concern + '</div><div class="c-mit">' + c.mitigation + '</div></div>';
+        });
+        html += '</div>';
+    }
+
+    // Conversation starter
+    if (fit.conversation_starter) {
+        html += '<div class="convo" data-section="conversation">&ldquo;' + fit.conversation_starter + '&rdquo;</div>';
+    }
+
+    // Next steps (handle both schema shapes)
+    var steps = fit.next_steps || fit.recommended_next_steps || [];
+    if (steps.length) {
+        html += '<div class="sec" data-section="next_steps"><div class="sec-title">Recommended Next Steps</div>';
+        steps.forEach(function(ns) {
+            html += '<div class="next"><div class="dot"></div><p>' + ns + '</p></div>';
+        });
+        html += '</div>';
+    }
+
+    // CTAs
+    html += '<div class="cta-row">' +
+        '<button class="btn btn-primary" onclick="trackCTA(\'request_quote\');' + (CONFIG.ctaRequestQuote ? "window.open('" + CONFIG.ctaRequestQuote + "','_blank')" : "alert('Contact the vendor to request a quote.')") + '">Request Quote</button>' +
+        '<button class="btn btn-outline" onclick="trackCTA(\'request_demo\');' + (CONFIG.ctaDemo ? "window.open('" + CONFIG.ctaDemo + "','_blank')" : "alert('Contact the vendor to schedule a demo.')") + '">Schedule Demo</button>' +
+        '</div>';
+
+    html += '<div style="text-align:center;margin-top:16px;font-size:12px;color:var(--t3)">' +
+        'Analysis completed in ' + meta.elapsed_seconds + 's | ' +
+        (meta.cache_hits.length > 0 ? 'Cached intelligence used' : 'Fresh research') +
+        '</div>';
+
+    document.getElementById('result').innerHTML = html;
+
+    setTimeout(setupSectionTracking, 100);
+}
+
+window.addEventListener('beforeunload', function() {
+    sendHeartbeat();
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+});
+</script>
+</body>
+</html>

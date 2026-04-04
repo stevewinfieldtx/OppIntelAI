@@ -1,13 +1,18 @@
 """
 OppIntelAI API Routes
-Unified endpoints for both Prospector and Hydrator modules.
+Unified endpoints for Prospector, Hydrator, Fit Check, Render, and ClearSignals proxy.
 """
+import hashlib
 import logging
+import time
+import uuid
+
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from typing import Optional
+
 from modules.hydrator.orchestrator import hydrate
 from modules.prospector.orchestrator import prospect
 from modules.formatter.synthesis_formatter import (
@@ -15,7 +20,12 @@ from modules.formatter.synthesis_formatter import (
     normalize_prospector_output,
     normalize_hydrator_output,
 )
-from core.cache import get_cache_stats, expire_tdp
+from core.cache import (
+    get_cache_stats, expire_tdp,
+    log_fit_check, update_fit_engagement, get_fit_check_leads,
+)
+from core.agents import solution_agent, customer_agent
+from modules.hydrator.agents import fit_check_agent
 from core.config import CLEARSIGNALS_URL, OPPINTELAI_PUBLIC_URL
 
 logger = logging.getLogger(__name__)
@@ -44,6 +54,21 @@ class ProspectorRequest(BaseModel):
     hydrate_results: Optional[bool] = Field(True, description="Run full hydration on found prospects")
 
 
+class FitCheckRequest(BaseModel):
+    """Prospect-facing fit check — just their URL + the vendor's URL."""
+    prospect_url: str = Field(..., description="URL of the prospect's company website")
+    solution_url: str = Field(..., description="URL of the vendor/solution website")
+    solution_name: Optional[str] = Field("", description="Solution name for caching")
+
+
+class FitEngagementUpdate(BaseModel):
+    """Frontend heartbeat to track engagement behavior."""
+    session_id: str = Field(..., description="Session ID from the fit check")
+    sections_viewed: list = Field(default_factory=list)
+    time_on_page_seconds: int = Field(0)
+    cta_clicked: str = Field("")
+
+
 class ExpireRequest(BaseModel):
     """Force-expire a cached TDP."""
     tdp_type: str = Field(..., description="Type of TDP: solution, industry, or customer")
@@ -56,11 +81,7 @@ class ExpireRequest(BaseModel):
 async def hydrate_lead(request: HydrationRequest):
     """
     Module 2: Reactive Hydration
-    
-    Takes a single inbound lead and runs it through the 5-agent pipeline:
-    Solution → Industry → Customer → Need ID → Questions
-    
-    Returns the complete hydrated lead card.
+    Takes a single inbound lead and runs it through the 5-agent pipeline.
     """
     try:
         result = await hydrate(
@@ -82,15 +103,7 @@ async def hydrate_lead(request: HydrationRequest):
 async def prospect_leads(request: ProspectorRequest):
     """
     Module 1: Proactive Prospecting
-    
-    Takes a solution and optionally a vertical + geography, then:
-    1. Analyzes the solution
-    2. Selects optimal vertical
-    3. Selects optimal metro
-    4. Finds qualifying companies
-    5. (Optional) Hydrates each prospect
-    
-    Returns the complete prospecting results.
+    Takes a solution and optionally a vertical + geography, finds qualifying companies.
     """
     try:
         result = await prospect(
@@ -107,31 +120,128 @@ async def prospect_leads(request: ProspectorRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# === Fit Check (Prospect-Facing Widget) ===
+
+@router.post("/fit-check", summary="Prospect-facing solution fit analysis")
+async def fit_check(request: FitCheckRequest, req: Request):
+    """
+    Prospect-facing endpoint. The prospect enters their company URL and
+    gets a personalized analysis of how the vendor's solution fits their business.
+
+    Pipeline:
+    1. Solution TDP (cached after first run — vendor pre-warms this)
+    2. Customer TDP (cached per company URL — reused across fit checks)
+    3. Fit synthesis (lightweight, always fresh per combination)
+
+    Engagement is logged for the vendor's lead intelligence dashboard.
+    """
+    start_time = time.time()
+    session_id = str(uuid.uuid4())
+    total_tokens = 0
+    cache_hits = []
+
+    try:
+        # Stage 1: Solution TDP (almost always cached)
+        solution_tdp = await solution_agent.run(
+            solution_url=request.solution_url,
+            solution_name=request.solution_name,
+        )
+        total_tokens += solution_tdp.get("token_cost", 0)
+        if solution_tdp.get("from_cache"):
+            cache_hits.append("solution")
+
+        # Stage 2: Customer TDP (cached per company URL)
+        customer_tdp = await customer_agent.run(
+            customer_url=request.prospect_url,
+            industry_context=solution_tdp.get("data", {}).get("category", ""),
+        )
+        total_tokens += customer_tdp.get("token_cost", 0)
+        if customer_tdp.get("from_cache"):
+            cache_hits.append("customer")
+
+        # Stage 3: Fit synthesis (always fresh per combination)
+        fit_result = await fit_check_agent.run(
+            solution_tdp=solution_tdp,
+            customer_tdp=customer_tdp,
+        )
+        total_tokens += fit_result.get("usage", {}).get("total_tokens", 0)
+
+        elapsed = round(time.time() - start_time, 1)
+        fit_data = fit_result.get("parsed", {})
+
+        # Log engagement for vendor intelligence
+        ip_raw = req.client.host if req.client else ""
+        ip_hash = hashlib.sha256(ip_raw.encode()).hexdigest()[:16] if ip_raw else ""
+
+        await log_fit_check(
+            session_id=session_id,
+            prospect_url=request.prospect_url,
+            solution_url=request.solution_url,
+            prospect_name=fit_data.get("company_name", ""),
+            prospect_industry=fit_data.get("industry", ""),
+            solution_name=solution_tdp.get("data", {}).get("solution_name", request.solution_name),
+            fit_score=fit_data.get("fit_score", 0),
+            fit_level=fit_data.get("fit_level", ""),
+            referrer=req.headers.get("referer", ""),
+            user_agent=req.headers.get("user-agent", ""),
+            ip_hash=ip_hash,
+        )
+
+        return {
+            "session_id": session_id,
+            "fit_analysis": fit_data,
+            "meta": {
+                "elapsed_seconds": elapsed,
+                "total_tokens": total_tokens,
+                "estimated_cost_usd": round(total_tokens * 0.25 / 1_000_000, 4),
+                "cache_hits": cache_hits,
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Fit check error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/fit-check/engagement", summary="Update fit check engagement data")
+async def fit_engagement(request: FitEngagementUpdate):
+    """Frontend heartbeat — tracks sections viewed, time spent, CTA clicks."""
+    try:
+        await update_fit_engagement(
+            session_id=request.session_id,
+            sections_viewed=request.sections_viewed,
+            time_on_page_seconds=request.time_on_page_seconds,
+            cta_clicked=request.cta_clicked,
+        )
+        return {"status": "updated"}
+    except Exception as e:
+        logger.error(f"Engagement update error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/fit-check/leads", summary="Get fit check lead intelligence")
+async def fit_leads(limit: int = 50):
+    """Vendor dashboard — see who's been checking fit and what they looked at."""
+    return await get_fit_check_leads(limit=limit)
+
+
 # === Render Endpoints — Agent 7 ===
 
 class RenderProspectorRequest(BaseModel):
-    """Render a prospector result as a self-contained HTML report."""
     result: dict = Field(..., description="Full prospector output from POST /prospect")
 
 
 class RenderHydratorRequest(BaseModel):
-    """Render a hydrator result as a self-contained HTML report."""
     result: dict = Field(..., description="Full hydrator output from POST /hydrate")
 
 
 @router.post("/render/prospect", summary="Render prospector output as HTML report",
              response_class=HTMLResponse)
 async def render_prospect_html(request: RenderProspectorRequest):
-    """
-    Agent 7 — Synthesis Formatter (Prospector)
-    Converts prospector JSON output into a self-contained, sales-rep-ready HTML card report.
-    Returns a full HTML page — save or open directly in browser.
-    """
     try:
         cards, meta = normalize_prospector_output(request.result)
         html = generate_html(
-            cards=cards,
-            meta=meta,
+            cards=cards, meta=meta,
             oppintelai_base_url=OPPINTELAI_PUBLIC_URL,
             clearsignals_url=CLEARSIGNALS_URL,
         )
@@ -144,16 +254,10 @@ async def render_prospect_html(request: RenderProspectorRequest):
 @router.post("/render/hydrate", summary="Render hydrator output as HTML report",
              response_class=HTMLResponse)
 async def render_hydrate_html(request: RenderHydratorRequest):
-    """
-    Agent 7 — Synthesis Formatter (Hydrator)
-    Converts a single hydrated lead into a self-contained HTML card report.
-    Returns a full HTML page — save or open directly in browser.
-    """
     try:
         cards, meta = normalize_hydrator_output(request.result)
         html = generate_html(
-            cards=cards,
-            meta=meta,
+            cards=cards, meta=meta,
             oppintelai_base_url=OPPINTELAI_PUBLIC_URL,
             clearsignals_url=CLEARSIGNALS_URL,
         )
@@ -166,23 +270,16 @@ async def render_hydrate_html(request: RenderHydratorRequest):
 # === ClearSignals Proxy ===
 
 class ThreadAnalysisRequest(BaseModel):
-    """Proxy a thread analysis request to ClearSignals."""
-    thread: str  = Field(..., description="Raw pasted email thread text")
-    mode:   str  = Field("coaching", description="'coaching' (live deal) or 'postmortem' (closed deal)")
-    userId: Optional[str] = Field(None, description="Optional user ID for ClearSignals memory")
+    thread: str = Field(..., description="Raw pasted email thread text")
+    mode: str = Field("coaching", description="'coaching' or 'postmortem'")
+    userId: Optional[str] = Field(None)
 
 
 @router.post("/analyze-thread", summary="Analyze email thread via ClearSignals")
 async def analyze_thread(request: ThreadAnalysisRequest):
-    """
-    Proxy endpoint — forwards the pasted email thread to ClearSignals' /api/analyze
-    and returns the structured analysis (intent score, signals, coaching).
-    """
     if not CLEARSIGNALS_URL:
-        raise HTTPException(
-            status_code=503,
-            detail="ClearSignals not configured. Set CLEARSIGNALS_URL in environment."
-        )
+        raise HTTPException(status_code=503, detail="ClearSignals not configured.")
+
     target = CLEARSIGNALS_URL.rstrip("/") + "/api/analyze"
     payload = {"thread": request.thread, "mode": request.mode}
     if request.userId:
@@ -205,7 +302,6 @@ async def analyze_thread(request: ThreadAnalysisRequest):
 
 @router.post("/expire", summary="Force-expire a cached TDP")
 async def expire_cache(request: ExpireRequest):
-    """Force-expire a cached TDP (simulates scanner major relevance trigger)."""
     success = await expire_tdp(request.tdp_type, request.identifier)
     if success:
         return {"status": "expired", "tdp_type": request.tdp_type, "identifier": request.identifier}
@@ -214,11 +310,10 @@ async def expire_cache(request: ExpireRequest):
 
 @router.get("/stats", summary="Cache and usage statistics")
 async def cache_stats():
-    """Get cache and usage statistics."""
     return await get_cache_stats()
 
 
 @router.get("/health", summary="Health check")
 async def health():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "OppIntelAI", "modules": ["prospector", "hydrator"]}
+    return {"status": "healthy", "service": "OppIntelAI",
+            "modules": ["prospector", "hydrator", "fit-check"]}

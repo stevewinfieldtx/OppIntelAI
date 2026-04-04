@@ -2,6 +2,7 @@
 TDP Cache Layer
 Handles caching of Targeted Decomposition Profiles with TTL expiration.
 Uses SQLite for persistence. Designed to swap to Postgres later.
+Also tracks fit-check engagement for lead intelligence.
 """
 import aiosqlite
 import json
@@ -48,6 +49,28 @@ async def init_db():
             )
         """)
 
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS fit_check_engagement (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                prospect_url TEXT NOT NULL,
+                prospect_name TEXT DEFAULT '',
+                prospect_industry TEXT DEFAULT '',
+                solution_url TEXT NOT NULL,
+                solution_name TEXT DEFAULT '',
+                fit_score INTEGER DEFAULT 0,
+                fit_level TEXT DEFAULT '',
+                sections_viewed TEXT DEFAULT '[]',
+                time_on_page_seconds INTEGER DEFAULT 0,
+                cta_clicked TEXT DEFAULT '',
+                referrer TEXT DEFAULT '',
+                user_agent TEXT DEFAULT '',
+                ip_hash TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+
         await db.commit()
         logger.info("Database initialized")
 
@@ -90,7 +113,6 @@ async def get_tdp(tdp_type: str, identifier: str) -> Optional[dict]:
 
         if row["force_expired"] or expires_at < now:
             logger.info(f"Cache EXPIRED: {key}")
-            # Delete expired entry
             await db.execute("DELETE FROM tdp_cache WHERE cache_key = ?", (key,))
             await db.commit()
             return None
@@ -176,6 +198,8 @@ async def expire_tdp(tdp_type: str, identifier: str) -> bool:
         return False
 
 
+# === Hydration Log ===
+
 async def log_hydration(
     solution: str,
     customer_url: str,
@@ -222,25 +246,123 @@ async def update_hydration_log(
         await db.commit()
 
 
+# === Fit Check Engagement Tracking ===
+
+async def log_fit_check(
+    session_id: str,
+    prospect_url: str,
+    solution_url: str,
+    prospect_name: str = "",
+    prospect_industry: str = "",
+    solution_name: str = "",
+    fit_score: int = 0,
+    fit_level: str = "",
+    referrer: str = "",
+    user_agent: str = "",
+    ip_hash: str = "",
+) -> int:
+    """Log a fit check engagement event. Returns the engagement ID."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        now = _now()
+        cursor = await db.execute(
+            """
+            INSERT INTO fit_check_engagement 
+            (session_id, prospect_url, prospect_name, prospect_industry,
+             solution_url, solution_name, fit_score, fit_level,
+             referrer, user_agent, ip_hash, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id, prospect_url, prospect_name, prospect_industry,
+                solution_url, solution_name, fit_score, fit_level,
+                referrer, user_agent, ip_hash, now, now,
+            ),
+        )
+        await db.commit()
+        logger.info(f"Fit engagement logged: session={session_id} prospect={prospect_url}")
+        return cursor.lastrowid
+
+
+async def update_fit_engagement(
+    session_id: str,
+    sections_viewed: list = None,
+    time_on_page_seconds: int = 0,
+    cta_clicked: str = "",
+):
+    """Update engagement tracking for an active fit check session."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE fit_check_engagement 
+            SET sections_viewed = ?, time_on_page_seconds = ?, cta_clicked = ?, updated_at = ?
+            WHERE session_id = ?
+            """,
+            (
+                json.dumps(sections_viewed or []),
+                time_on_page_seconds,
+                cta_clicked,
+                _now(),
+                session_id,
+            ),
+        )
+        await db.commit()
+
+
+async def get_fit_check_leads(limit: int = 50) -> list:
+    """Get fit check leads for the vendor dashboard."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """
+            SELECT * FROM fit_check_engagement 
+            ORDER BY created_at DESC LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": row["id"],
+                "session_id": row["session_id"],
+                "prospect_url": row["prospect_url"],
+                "prospect_name": row["prospect_name"],
+                "prospect_industry": row["prospect_industry"],
+                "solution_url": row["solution_url"],
+                "solution_name": row["solution_name"],
+                "fit_score": row["fit_score"],
+                "fit_level": row["fit_level"],
+                "sections_viewed": json.loads(row["sections_viewed"]),
+                "time_on_page_seconds": row["time_on_page_seconds"],
+                "cta_clicked": row["cta_clicked"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
+
+# === Stats ===
+
 async def get_cache_stats() -> dict:
     """Get cache statistics for the dashboard."""
     async with aiosqlite.connect(DB_PATH) as db:
-        # Count by type
         cursor = await db.execute(
             "SELECT tdp_type, COUNT(*) as count FROM tdp_cache WHERE force_expired = 0 GROUP BY tdp_type"
         )
         type_counts = {row[0]: row[1] for row in await cursor.fetchall()}
 
-        # Total hydrations
         cursor = await db.execute("SELECT COUNT(*) FROM hydration_log")
         total_hydrations = (await cursor.fetchone())[0]
 
-        # Total tokens spent
         cursor = await db.execute("SELECT COALESCE(SUM(total_tokens), 0) FROM hydration_log")
         total_tokens = (await cursor.fetchone())[0]
+
+        cursor = await db.execute("SELECT COUNT(*) FROM fit_check_engagement")
+        total_fit_checks = (await cursor.fetchone())[0]
 
         return {
             "cached_tdps": type_counts,
             "total_hydrations": total_hydrations,
             "total_tokens_spent": total_tokens,
+            "total_fit_checks": total_fit_checks,
         }

@@ -3,6 +3,7 @@ OppIntelAI
 AI-powered sales intelligence platform.
 Module 1: Prospector (Proactive) — Find leads
 Module 2: Hydrator (Reactive) — Enrich inbound leads
+Module 3: Fit Check (Prospect-Facing) — Self-serve fit analysis widget
 """
 import logging
 import os
@@ -24,19 +25,20 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🚀 OppIntelAI starting...")
+    logger.info("OppIntelAI starting...")
     await init_db()
-    logger.info("✅ Database initialized")
+    logger.info("Database initialized")
     yield
-    logger.info("👋 OppIntelAI shutting down")
+    logger.info("OppIntelAI shutting down")
 
 
 app = FastAPI(
     title="OppIntelAI",
     description="AI-powered sales intelligence platform. "
                 "Module 1: Prospector (proactive lead finding). "
-                "Module 2: Hydrator (reactive lead enrichment).",
-    version="0.1.0",
+                "Module 2: Hydrator (reactive lead enrichment). "
+                "Module 3: Fit Check (prospect-facing fit analysis widget).",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -54,6 +56,12 @@ app.include_router(api_router)
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/fit", response_class=HTMLResponse)
+async def fit_widget(request: Request):
+    """Prospect-facing fit check widget. Vendor links: /fit?solution=URL&name=Name"""
+    return templates.TemplateResponse("fit-widget.html", {"request": request})
 
 
 if __name__ == "__main__":
