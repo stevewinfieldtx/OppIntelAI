@@ -12,10 +12,6 @@ from core.llm import call_llm_json
 logger = logging.getLogger(__name__)
 
 # ── System prompt: role only, zero hardcoded criteria ────────────────────────
-# All qualification logic (size, revenue, tech footprint, scoring rubric) is
-# injected at runtime via the user prompt, derived from the solution TDP and
-# vertical selection.  This makes the agent work correctly for any solution
-# from SMB ERP to enterprise NDR without any code changes.
 SYSTEM_PROMPT = """You are the Account Prospector Agent in a proactive B2B lead prospecting engine.
 
 Your job: given a solution profile, a target vertical, and a target metro, identify SPECIFIC REAL
@@ -40,51 +36,51 @@ Rules:
 8. If you cannot find enough qualifying companies, return what you have with honest counts.
    Do NOT pad results with fabricated or marginally-qualifying entries.
 
-   Return your findings as JSON:
-   {
-     "prospects": [
-         {
-               "id": 1,
-                     "name": "Exact company name",
-                           "website": "Company URL or empty string if not found",
-                                 "metro": "Metro area",
-                                       "location": "City, ST",
-                                             "landmark": "Specific local landmark or business park",
-                                                   "employees": "Estimated range e.g. 150-300",
-                                                         "phone": "(XXX) XXX-XXXX or empty string if not found",
-                                                               "priority": 85,
-                                                                     "priority_class": "high | medium | low",
-                                                                           "who_is_this": "2-3 sentence narrative: company type + local market position + current trigger event + pain implication",
-                                                                                 "contact_title": "Most likely decision-maker title",
-                                                                                       "lead_module": "The specific solution capability that maps to their top pain",
-                                                                                             "pain_tags": ["Pain point 1", "Pain point 2", "Pain point 3"],
-                                                                                                   "growth_signals": ["Specific evidence of growth, hiring, or change"],
-                                                                                                         "disqualification_risk": "Any reason this lead might not qualify on deeper inspection"
+Return your findings as JSON:
+{
+  "prospects": [
+    {
+      "id": 1,
+      "name": "Exact company name",
+      "website": "Company URL or empty string if not found",
+      "metro": "Metro area",
+      "location": "City, ST",
+      "landmark": "Specific local landmark or business park",
+      "employees": "Estimated range e.g. 150-300",
+      "phone": "(XXX) XXX-XXXX or empty string if not found",
+      "priority": 85,
+      "priority_class": "high | medium | low",
+      "who_is_this": "2-3 sentence narrative: company type + local market position + current trigger event + pain implication",
+      "contact_title": "Most likely decision-maker title",
+      "lead_module": "The specific solution capability that maps to their top pain",
+      "pain_tags": ["Pain point 1", "Pain point 2", "Pain point 3"],
+      "growth_signals": ["Specific evidence of growth, hiring, or change"],
+      "disqualification_risk": "Any reason this lead might not qualify on deeper inspection"
     }
-      ],
-        "search_summary": {
-            "total_found": 0,
-                "high_priority": 0,
-                    "medium_priority": 0,
-                        "metros_covered": ["Specific sub-areas searched within the metro"],
-                            "verticals_represented": ["Micro-verticals found"]
-                              }
-                              }"""
+  ],
+  "search_summary": {
+    "total_found": 0,
+    "high_priority": 0,
+    "medium_priority": 0,
+    "metros_covered": ["Specific sub-areas searched within the metro"],
+    "verticals_represented": ["Micro-verticals found"]
+  }
+}"""
 
 
 def _build_qualification_block(sol_data: dict, vert_data: dict) -> str:
-       """
-           Build the qualification criteria, disqualification signals, and scoring
-               rubric dynamically from the solution TDP and vertical selection.
+    """
+    Build the qualification criteria, disqualification signals, and scoring
+    rubric dynamically from the solution TDP and vertical selection.
 
-                   This is the core of the fix: nothing is hardcoded.  Every run derives its
-                       own criteria from the actual solution being prospected.
-                           """
-       ibp = sol_data.get("ideal_buyer_profile", {})
-       company_size = ibp.get("company_size", "any size — use judgment based on solution complexity")
-       revenue_range = ibp.get("revenue_range", "not specified — infer from company size")
-       complexity_trigger = ibp.get("complexity_trigger", "")
-       tools_outgrown = ibp.get("current_tools_outgrown", [])
+    This is the core of the fix: nothing is hardcoded.  Every run derives its
+    own criteria from the actual solution being prospected.
+    """
+    ibp = sol_data.get("ideal_buyer_profile", {})
+    company_size = ibp.get("company_size", "any size — use judgment based on solution complexity")
+    revenue_range = ibp.get("revenue_range", "not specified — infer from company size")
+    complexity_trigger = ibp.get("complexity_trigger", "")
+    tools_outgrown = ibp.get("current_tools_outgrown", [])
 
     switching_triggers = sol_data.get("switching_triggers", [])
     target_market = sol_data.get("target_market", "")
@@ -95,56 +91,114 @@ def _build_qualification_block(sol_data: dict, vert_data: dict) -> str:
     pain_density = vert_data.get("pain_density", "")
 
     # Build disqualifiers: only include tools that are direct replacements,
-    # NOT ancillary tools that happen to share the market (e.g., having Salesforce
-    # is NOT a disqualifier for a security product).
+    # NOT ancillary tools that happen to share the market
     disqualifier_block = ""
     if tools_outgrown:
-               disqualifier_block = f"""
-               DISQUALIFICATION SIGNALS (companies already well-served — likely not a fit):
-               - Already running: {', '.join(tools_outgrown)}
-                 Note: only disqualify if these tools directly replace the solution's core function.
-                   Presence of unrelated enterprise tools (CRM, HRIS, etc.) is NOT a disqualifier."""
+        disqualifier_block = f"""
+DISQUALIFICATION SIGNALS (companies already well-served — likely not a fit):
+- Already running: {', '.join(tools_outgrown)}
+  Note: only disqualify if these tools directly replace the solution's core function.
+  Presence of unrelated enterprise tools (CRM, HRIS, etc.) is NOT a disqualifier."""
 
     # Build scoring rubric derived from the solution's switching triggers
     trigger_lines = "\n".join(
-               f"  - {t}" for t in switching_triggers[:6]
+        f"  - {t}" for t in switching_triggers[:6]
     ) if switching_triggers else "  - Operational complexity matching the solution's core use case"
 
     micro_lines = "\n".join(
-               f"  - {m}" for m in micro_verticals[:5]
+        f"  - {m}" for m in micro_verticals[:5]
     ) if micro_verticals else ""
 
     return f"""
-    QUALIFICATION CRITERIA (derived from solution profile — apply these, not generic SMB filters):
-    - Target company size: {company_size}
-    - Target revenue range: {revenue_range}
-    - Complexity trigger: {complexity_trigger}
-    - Solution category: {solution_category}
-    - Target market: {target_market}
-    {disqualifier_block}
+QUALIFICATION CRITERIA (derived from solution profile — apply these, not generic SMB filters):
+- Target company size: {company_size}
+- Target revenue range: {revenue_range}
+- Complexity trigger: {complexity_trigger}
+- Solution category: {solution_category}
+- Target market: {target_market}
+{disqualifier_block}
 
-    SCORING RUBRIC (0-100) — score based on fit to THIS solution, not generic signals:
-      90-100: Multiple active switching triggers present + size/complexity match + no incumbent
-        80-89:  Strong size/complexity match + at least one clear switching trigger
-          70-79:  Size/complexity match, switching triggers inferred but not confirmed
-            60-69:  Partial fit — matches vertical but size or complexity is borderline
-              Below 60: Marginal — include only if the vertical has thin pickings
+SCORING RUBRIC (0-100) — score based on fit to THIS solution, not generic signals:
+  90-100: Multiple active switching triggers present + size/complexity match + no incumbent
+  80-89:  Strong size/complexity match + at least one clear switching trigger
+  70-79:  Size/complexity match, switching triggers inferred but not confirmed
+  60-69:  Partial fit — matches vertical but size or complexity is borderline
+  Below 60: Marginal — include only if the vertical has thin pickings
 
-              Switching triggers that drive a 90+ score for this solution:
-              {trigger_lines}
+Switching triggers that drive a 90+ score for this solution:
+{trigger_lines}
 
-              PRIORITY MICRO-VERTICALS within the target vertical (highest-propensity sub-segments):
-              {micro_lines if micro_lines else "  - Use the vertical selection rationale to identify sub-segments"}
+PRIORITY MICRO-VERTICALS within the target vertical (highest-propensity sub-segments):
+{micro_lines if micro_lines else "  - Use the vertical selection rationale to identify sub-segments"}
 
-              Structural fit rationale for this vertical: {structural_fit}
-              Pain density context: {pain_density}"""
+Structural fit rationale for this vertical: {structural_fit}
+Pain density context: {pain_density}"""
 
 
 async def run(
-       solution_tdp: dict,
-       vertical_data: dict,
-       metro_data: dict,
-       account_volume: int = 10,
+    solution_tdp: dict,
+    vertical_data: dict,
+    metro_data: dict,
+    account_volume: int = 10,
 ) -> dict:
-       """
-           Find and qual
+    """
+    Find and qualify real companies matching the solution profile.
+
+    Args:
+        solution_tdp: The solution's True Data Profile
+        vertical_data: Selected vertical analysis
+        metro_data: Selected metro analysis
+        account_volume: Number of prospects to find (1-50)
+
+    Returns:
+        dict with 'parsed' key containing prospects and search_summary
+    """
+    sol_data = solution_tdp.get("parsed", solution_tdp)
+    vert_data = vertical_data.get("parsed", vertical_data)
+    metro = metro_data.get("parsed", metro_data)
+
+    solution_name = sol_data.get("solution_name", "Unknown Solution")
+    vertical_name = vert_data.get("vertical_name", vert_data.get("name", "Unknown Vertical"))
+    metro_name = metro.get("metro_name", metro.get("name", "Unknown Metro"))
+
+    qualification_block = _build_qualification_block(sol_data, vert_data)
+
+    user_prompt = f"""Find {account_volume} real companies for this prospecting campaign:
+
+SOLUTION: {solution_name}
+{json.dumps(sol_data, indent=2)[:2000]}
+
+TARGET VERTICAL: {vertical_name}
+TARGET METRO: {metro_name}
+
+{qualification_block}
+
+Find {account_volume} specific, real companies in or near {metro_name} that operate in the
+{vertical_name} vertical and match the qualification criteria above.
+
+Use web search to verify each company is real. Return valid JSON."""
+
+    logger.info(
+        f"🔍 Account Prospector | solution={solution_name} | "
+        f"vertical={vertical_name} | metro={metro_name} | "
+        f"volume={account_volume}"
+    )
+
+    result = await call_llm_json(
+        system_prompt=SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        max_tokens=8192,
+        use_web_search=True,
+    )
+
+    parsed = result.get("parsed", {})
+    prospects = parsed.get("prospects", [])
+
+    logger.info(
+        f"✅ Account Prospector complete | "
+        f"found={len(prospects)} prospects | "
+        f"high={sum(1 for p in prospects if p.get('priority_class') == 'high')} | "
+        f"medium={sum(1 for p in prospects if p.get('priority_class') == 'medium')}"
+    )
+
+    return result
