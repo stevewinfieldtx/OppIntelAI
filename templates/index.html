@@ -95,6 +95,43 @@ body{background:var(--bg);color:var(--t1);font-family:'DM Sans',sans-serif;min-h
 .pc:hover{background:var(--card2);transform:translateY(-2px)}
 .hid{display:none!important}
 .tc::-webkit-scrollbar{width:6px}.tc::-webkit-scrollbar-track{background:transparent}.tc::-webkit-scrollbar-thumb{background:var(--t3);border-radius:3px}
+
+/* === Thread Coach === */
+.cs-fab{position:fixed;bottom:28px;right:28px;z-index:100;display:flex;align-items:center;gap:10px;padding:14px 22px;border-radius:100px;background:linear-gradient(135deg,#a78bfa,#7c3aed);border:none;color:#fff;font-family:'DM Sans',sans-serif;font-size:15px;font-weight:600;cursor:pointer;box-shadow:0 8px 32px rgba(124,58,237,.4);transition:all .2s}
+.cs-fab:hover{transform:translateY(-2px);box-shadow:0 12px 40px rgba(124,58,237,.5)}
+.cs-badge{background:rgba(255,255,255,.2);border-radius:100px;padding:2px 9px;font-size:12px;font-weight:700}
+.cs-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;backdrop-filter:blur(4px)}
+.cs-overlay.open{display:flex;align-items:center;justify-content:center;padding:20px}
+.cs-modal{background:var(--card);border:1px solid var(--bdr);border-radius:20px;width:100%;max-width:680px;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column}
+.cs-head{display:flex;align-items:center;justify-content:space-between;padding:24px 28px;border-bottom:1px solid var(--bdr)}
+.cs-title{font-family:'Instrument Serif',serif;font-size:22px}
+.cs-close{background:none;border:none;color:var(--t3);font-size:22px;cursor:pointer;line-height:1;padding:4px}
+.cs-close:hover{color:var(--t1)}
+.cs-body{padding:28px;display:flex;flex-direction:column;gap:20px}
+.cs-meta{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.cs-uses{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--t3)}
+.cs-uses strong{color:var(--violet)}
+.cs-modes{display:flex;gap:6px}
+.cs-mode{padding:6px 16px;border-radius:100px;border:1px solid var(--bdr);background:transparent;color:var(--t3);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:1px;cursor:pointer;transition:all .2s}
+.cs-mode.active{border-color:var(--violet);background:rgba(167,139,250,.1);color:var(--violet)}
+.cs-textarea{width:100%;min-height:180px;background:var(--inp);border:1px solid var(--bdr);border-radius:10px;padding:16px;color:var(--t1);font-family:'DM Sans',sans-serif;font-size:14px;line-height:1.6;resize:vertical;outline:none;transition:border-color .2s}
+.cs-textarea:focus{border-color:var(--violet)}
+.cs-textarea::placeholder{color:var(--t3)}
+.cs-btn{width:100%;padding:14px;border:none;border-radius:10px;background:linear-gradient(135deg,var(--violet),#7c3aed);color:#fff;font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;cursor:pointer;transition:all .2s}
+.cs-btn:hover{opacity:.9}
+.cs-btn:disabled{opacity:.4;cursor:not-allowed}
+.cs-results{background:var(--bg);border:1px solid var(--bdr);border-radius:12px;padding:24px;display:none}
+.cs-results.show{display:block}
+.cs-section{margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--bdr)}
+.cs-section:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+.cs-section h4{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--violet);margin-bottom:10px}
+.cs-section p,.cs-section li{font-size:14px;color:var(--t2);line-height:1.7}
+.cs-section ul{list-style:none;padding:0}
+.cs-section ul li{padding:6px 0 6px 16px;position:relative}
+.cs-section ul li::before{content:'→';position:absolute;left:0;color:var(--violet)}
+.cs-upgrade{text-align:center;padding:24px;background:rgba(167,139,250,.05);border:1px solid rgba(167,139,250,.2);border-radius:12px}
+.cs-upgrade p{color:var(--t2);margin-bottom:16px;font-size:15px}
+.cs-upgrade a{display:inline-block;padding:12px 28px;border-radius:100px;background:linear-gradient(135deg,var(--violet),#7c3aed);color:#fff;text-decoration:none;font-weight:600;font-size:14px}
 </style>
 </head>
 <body>
@@ -151,6 +188,36 @@ body{background:var(--bg);color:var(--t1);font-family:'DM Sans',sans-serif;min-h
 
 <!-- RESULTS -->
 <div class="res" id="res"><div class="rm" id="rm"></div><div class="tn" id="tn"></div><div class="tc" id="tc"></div></div>
+</div>
+
+<!-- Thread Coach FAB -->
+<button class="cs-fab" onclick="csOpen()">
+    💬 Thread Coach <span class="cs-badge" id="cs-fab-badge">3 free</span>
+</button>
+
+<!-- Thread Coach Modal -->
+<div class="cs-overlay" id="cs-overlay" onclick="csOverlayClick(event)">
+<div class="cs-modal">
+    <div class="cs-head">
+        <div>
+            <div class="cs-title">Thread Coach</div>
+            <p style="font-size:13px;color:var(--t3);margin-top:4px">Paste an email thread or conversation. Get AI coaching on what to do next.</p>
+        </div>
+        <button class="cs-close" onclick="csClose()">✕</button>
+    </div>
+    <div class="cs-body">
+        <div class="cs-meta">
+            <div class="cs-uses" id="cs-uses-label"><!-- filled by JS --></div>
+            <div class="cs-modes">
+                <button class="cs-mode active" id="cs-mode-coaching" onclick="csSetMode('coaching')">COACHING</button>
+                <button class="cs-mode" id="cs-mode-postmortem" onclick="csSetMode('postmortem')">POST-MORTEM</button>
+            </div>
+        </div>
+        <textarea class="cs-textarea" id="cs-thread" placeholder="Paste your email thread or conversation here…&#10;&#10;The more context the better — include subject lines, names, and the full back-and-forth."></textarea>
+        <button class="cs-btn" id="cs-submit" onclick="csAnalyze()">Analyze Thread</button>
+        <div class="cs-results" id="cs-results"></div>
+    </div>
+</div>
 </div>
 
 <script>
@@ -282,14 +349,14 @@ function mkTabs(tabs,first){
 function renderH(d){
     const m=d.meta;
     document.getElementById('rm').innerHTML=`<span class="mc g">✓ ${m.elapsed_seconds}s</span><span class="mc">${m.total_tokens.toLocaleString()} tokens</span><span class="mc b">~$${m.estimated_cost_usd.toFixed(4)}</span><span class="mc g">${m.cache_hits.length}/3 cached</span><button id="rptBtn" onclick="generateReport()" style="margin-left:auto;padding:8px 18px;border:none;border-radius:8px;background:linear-gradient(135deg,#0070D2,#038387);color:#fff;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;">📊 Generate HTML Report</button>`;
-    mkTabs([['ov','Overview'],['sol','Solution'],['ind','Industry'],['cus','Customer'],['nee','Needs'],['scr','Scripts']]);
-    rOv(d);rSol(d.solution_tdp);rInd(d.industry_tdp);rCus(d.customer_tdp);rNee(d.need_analysis);rScr(d.conversation_toolkit);
+    mkTabs([['ov','Overview'],['ind','Market'],['sol','Solution'],['cus','Customer'],['nee','Needs'],['scr','Scripts']]);
+    rOv(d);rInd(d.industry_tdp);rSol(d.solution_tdp);rCus(d.customer_tdp);rNee(d.need_analysis);rScr(d.conversation_toolkit);
 }
 
 function renderP(d){
     const m=d.meta;
     document.getElementById('rm').innerHTML=`<span class="mc cy">🔍 ${m.accounts_found} found</span><span class="mc g">✓ ${m.elapsed_seconds}s</span><span class="mc">${m.total_tokens.toLocaleString()} tokens</span><span class="mc b">~$${m.estimated_cost_usd.toFixed(4)}</span><span class="mc cy">${m.selected_vertical||''}</span><span class="mc cy">📍 ${m.selected_metro||''}</span><button id="rptBtn" onclick="generateReport()" style="margin-left:auto;padding:8px 18px;border:none;border-radius:8px;background:linear-gradient(135deg,#0070D2,#038387);color:#fff;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;">📊 Generate HTML Report</button>`;
-    mkTabs([['pro','Prospects'],['sol','Solution'],['ind','Industry'],['met','Metro']]);
+    mkTabs([['pro','Prospects'],['ind','Market'],['sol','Solution'],['met','Metro']]);
     let h='<div class="stit">Found Prospects</div><div class="pg">';
     (d.prospects||[]).forEach((p,i)=>{
         const pr=p.prospect||p;const sc=pr.priority||0;
@@ -298,7 +365,7 @@ function renderP(d){
     });
     h+='</div>';
     document.getElementById('p-pro').innerHTML=h;
-    rSol(d.solution_tdp);rInd(d.industry_tdp);
+    rInd(d.industry_tdp);rSol(d.solution_tdp);
     const mt=d.metro_selection||{};
     let mh=`<div class="stit">${mt.selected_metro||'Metro'}</div><div class="ss"><h4>Rationale</h4><p>${mt.rationale||''}</p></div>`;
     if(mt.key_business_corridors?.length){mh+=`<div class="ss"><h4>Business Corridors</h4><ul>`;mt.key_business_corridors.forEach(c=>{mh+=`<li><strong>${c.corridor}</strong> — ${c.description||''}</li>`;});mh+=`</ul></div>`;}
@@ -331,9 +398,10 @@ function rSol(s){if(!s)return;let h=`<div class="stit">${s.solution_name||'Solut
     if(s.switching_triggers?.length){h+=`<div class="ss"><h4>Switching Triggers</h4>`;s.switching_triggers.forEach(t=>{h+=`<span class="tg tg-c">${t}</span> `;});h+=`</div>`;}
     document.getElementById('p-sol').innerHTML=h;
 }
-function rInd(ind){if(!ind)return;let h=`<div class="stit">${ind.industry_name||'Industry'}</div><div class="ss"><h4>Overview</h4><p>${ind.industry_overview||''}</p></div>`;
-    if(ind.current_pain_points?.length){h+=`<div class="ss"><h4>Pain Points</h4><ul>`;ind.current_pain_points.forEach(p=>{const t=p.severity==='critical'?'tg-c':p.severity==='high'?'tg-a':'tg-b';h+=`<li><strong>${p.pain}</strong> <span class="tg ${t}">${p.severity}</span><br>${p.root_cause||''}</li>`;});h+=`</ul></div>`;}
-    if(ind.industry_language?.key_terms?.length){h+=`<div class="ss"><h4>Industry Language</h4>`;ind.industry_language.key_terms.forEach(t=>{h+=`<span class="tg tg-b">${t}</span> `;});h+=`</div>`;}
+function rInd(ind){if(!ind)return;
+    let h=`<div style="margin-bottom:20px"><div class="stit">${ind.industry_name||'Market'} — What's Happening Right Now</div><p style="font-size:13px;color:var(--t3);margin-top:6px;font-style:italic">Big picture context. What this market is dealing with, regardless of your solution.</p></div><div class="ss"><h4>Market Overview</h4><p>${ind.industry_overview||''}</p></div>`;
+    if(ind.current_pain_points?.length){h+=`<div class="ss"><h4>Forces Shaping This Market</h4><ul>`;ind.current_pain_points.forEach(p=>{const t=p.severity==='critical'?'tg-c':p.severity==='high'?'tg-a':'tg-b';h+=`<li><strong>${p.pain}</strong> <span class="tg ${t}">${p.severity}</span><br>${p.root_cause||''}</li>`;});h+=`</ul></div>`;}
+    if(ind.industry_language?.key_terms?.length){h+=`<div class="ss"><h4>Language They Use</h4><p style="font-size:12px;color:var(--t3);margin-bottom:10px">Drop these in conversation to signal you understand their world.</p>`;ind.industry_language.key_terms.forEach(t=>{h+=`<span class="tg tg-b">${t}</span> `;});h+=`</div>`;}
     document.getElementById('p-ind').innerHTML=h;
 }
 function rCus(c){rCusTo('p-cus',c);}
@@ -357,6 +425,136 @@ function rScrTo(id,tk){if(!tk)return;let h='';
     if(tk.email_draft){h+=`<div class="ss"><h4>Email Draft</h4><div class="ep"><div class="es">Subject: ${tk.email_draft.subject_line||''}</div><div style="white-space:pre-wrap">${tk.email_draft.body||''}</div>${tk.email_draft.ps_hook?`<p style="margin-top:16px;font-style:italic;color:var(--amber)">P.S. ${tk.email_draft.ps_hook}</p>`:''}</div></div>`;}
     const el=document.getElementById(id);if(el)el.innerHTML=h;
 }
+
+// === Thread Coach ===
+const CS_FREE_LIMIT = 3;
+const CS_STORAGE_KEY = 'cs_uses';
+let csMode = 'coaching';
+
+function csGetUses(){return parseInt(localStorage.getItem(CS_STORAGE_KEY)||'0',10);}
+function csSetUses(n){localStorage.setItem(CS_STORAGE_KEY,String(n));}
+
+function csUpdateLabels(){
+    const used=csGetUses();
+    const left=Math.max(0,CS_FREE_LIMIT-used);
+    const badge=document.getElementById('cs-fab-badge');
+    const label=document.getElementById('cs-uses-label');
+    if(badge){badge.textContent=left>0?`${left} free`:'upgrade';}
+    if(label){
+        if(left>0){label.innerHTML=`<strong>${left}</strong> of ${CS_FREE_LIMIT} free analyses remaining`;}
+        else{label.innerHTML=`<strong style="color:var(--coral)">Free analyses used</strong>`;}
+    }
+}
+
+function csSetMode(m){
+    csMode=m;
+    document.getElementById('cs-mode-coaching').classList.toggle('active',m==='coaching');
+    document.getElementById('cs-mode-postmortem').classList.toggle('active',m==='postmortem');
+}
+
+function csOpen(){csUpdateLabels();document.getElementById('cs-overlay').classList.add('open');}
+function csClose(){document.getElementById('cs-overlay').classList.remove('open');}
+function csOverlayClick(e){if(e.target===document.getElementById('cs-overlay'))csClose();}
+
+async function csAnalyze(){
+    const used=csGetUses();
+    const resultsEl=document.getElementById('cs-results');
+    const btn=document.getElementById('cs-submit');
+
+    if(used>=CS_FREE_LIMIT){
+        resultsEl.className='cs-results show';
+        resultsEl.innerHTML=`<div class="cs-upgrade"><p>You've used your ${CS_FREE_LIMIT} free Thread Coach analyses.<br>Upgrade to ClearSignals AI for unlimited coaching.</p><a href="https://clearsignals.ai" target="_blank">Get ClearSignals AI →</a></div>`;
+        return;
+    }
+
+    const thread=document.getElementById('cs-thread').value.trim();
+    if(!thread){alert('Paste an email thread first.');return;}
+
+    btn.disabled=true;btn.textContent='Analyzing…';
+    resultsEl.className='cs-results';
+
+    try{
+        const resp=await fetch('/api/v1/analyze-thread',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({thread,mode:csMode})
+        });
+
+        if(!resp.ok){
+            const err=await resp.text();
+            throw new Error(resp.status===503?'Thread Coach isn\'t connected yet. Ask your admin to configure ClearSignals.':err);
+        }
+
+        const data=await resp.json();
+        csSetUses(used+1);
+        csUpdateLabels();
+        csRenderResult(data,resultsEl);
+    }catch(e){
+        resultsEl.className='cs-results show';
+        resultsEl.innerHTML=`<div class="cs-section"><h4>Error</h4><p style="color:var(--coral)">${e.message}</p></div>`;
+    }finally{
+        btn.disabled=false;btn.textContent='Analyze Thread';
+    }
+}
+
+function csRenderResult(data,el){
+    el.className='cs-results show';
+    let h='';
+
+    // Handle flexible response shapes from ClearSignals
+    const situation=data.situation||data.summary||data.context||'';
+    const whatHappened=data.what_happened||data.diagnosis||'';
+    const nextSteps=data.next_steps||data.recommendations||data.actions||[];
+    const talkTrack=data.talk_track||data.suggested_response||data.draft||'';
+    const warnings=data.warnings||data.risks||data.watch_out||[];
+    const score=data.engagement_score||data.score||null;
+
+    if(score!==null){
+        const cls=score>=70?'sb-h':score>=40?'sb-m':'sb-l';
+        h+=`<div style="margin-bottom:20px"><span class="${cls} sb">${score} Engagement Score</span></div>`;
+    }
+
+    if(situation){h+=`<div class="cs-section"><h4>Situation Read</h4><p>${situation}</p></div>`;}
+    if(whatHappened){h+=`<div class="cs-section"><h4>What's Actually Happening</h4><p>${whatHappened}</p></div>`;}
+
+    if(Array.isArray(nextSteps)&&nextSteps.length){
+        h+=`<div class="cs-section"><h4>What To Do Next</h4><ul>`;
+        nextSteps.forEach(s=>{
+            const text=typeof s==='string'?s:(s.action||s.step||s.recommendation||JSON.stringify(s));
+            h+=`<li>${text}</li>`;
+        });
+        h+=`</ul></div>`;
+    }else if(typeof nextSteps==='string'&&nextSteps){
+        h+=`<div class="cs-section"><h4>What To Do Next</h4><p>${nextSteps}</p></div>`;
+    }
+
+    if(talkTrack){
+        h+=`<div class="cs-section"><h4>Suggested Response</h4><div class="ep" style="white-space:pre-wrap;font-size:14px;line-height:1.7">${talkTrack}</div></div>`;
+    }
+
+    if(Array.isArray(warnings)&&warnings.length){
+        h+=`<div class="cs-section"><h4>Watch Out For</h4><ul>`;
+        warnings.forEach(w=>{h+=`<li>${typeof w==='string'?w:JSON.stringify(w)}</li>`;});
+        h+=`</ul></div>`;
+    }
+
+    // Fallback: if none of the known fields matched, render raw
+    if(!h){
+        h=`<div class="cs-section"><h4>Analysis</h4><pre style="white-space:pre-wrap;font-size:13px;color:var(--t2)">${JSON.stringify(data,null,2)}</pre></div>`;
+    }
+
+    const usedNow=csGetUses();
+    const left=CS_FREE_LIMIT-usedNow;
+    if(left===0){
+        h+=`<div class="cs-upgrade" style="margin-top:20px"><p>That was your last free analysis. Upgrade to ClearSignals AI for unlimited coaching on every deal.</p><a href="https://clearsignals.ai" target="_blank">Get ClearSignals AI →</a></div>`;
+    }else{
+        h+=`<p style="font-size:12px;color:var(--t3);margin-top:16px;text-align:center">${left} free ${left===1?'analysis':'analyses'} remaining · <a href="https://clearsignals.ai" target="_blank" style="color:var(--violet)">Upgrade to ClearSignals AI</a></p>`;
+    }
+
+    el.innerHTML=h;
+}
+
+csUpdateLabels();
 </script>
 </body>
 </html>
