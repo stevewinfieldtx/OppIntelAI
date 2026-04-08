@@ -1,11 +1,20 @@
 """
 Customer Agent
 Builds the Targeted Decomposition Profile for a specific prospect company.
-Gathers everything publicly available about the company.
+
+Scraping strategy (in priority order):
+  1. Firecrawl scrape — homepage clean markdown
+  2. Firecrawl interact — team/leadership + careers pages in one session
+  3. LLM web search (:online) — fills gaps and enriches with news,
+     reviews, LinkedIn signals, job postings
+
+Firecrawl is optional — if FIRECRAWL_API_KEY is not set the agent
+falls back entirely to LLM web search, same as before.
 """
 import logging
 from core.llm import call_llm_json
 from core.cache import get_tdp, store_tdp
+from core import firecrawl
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +22,9 @@ SYSTEM_PROMPT = """You are the Customer Agent in a lead hydration engine. Your j
 
 You are a business intelligence researcher. You must find everything publicly available about this company that would help a sales rep have an informed conversation.
 
-Use web search extensively. Check the company website, LinkedIn, news articles, job postings, reviews (Google, Glassdoor, BBB), public records, and social media.
+Where SCRAPED CONTENT is provided below, treat it as ground truth — it came directly from the company's own website. Build on it, don't contradict it.
+
+Use web search to fill any gaps: LinkedIn, news articles, job postings, reviews (Google, Glassdoor, BBB), public records, and social media.
 
 Return your analysis as JSON with this exact structure:
 
@@ -68,46 +79,75 @@ Return your analysis as JSON with this exact structure:
     ]
 }
 
-Every data point should be grounded in what you actually found. If you can't find something, say so rather than making it up. The worst thing a sales rep can do is cite a fabricated detail."""
+Every data point should be grounded in what you actually found. If you can't find something, say so rather than making it up."""
 
 
 async def run(customer_url: str, industry_context: str = "") -> dict:
     """
     Build or retrieve the Customer TDP.
-    
+
     Args:
-        customer_url: URL of the prospect company's website
-        industry_context: Optional industry context from Industry Agent to inform research
-        
+        customer_url:     URL of the prospect company's website
+        industry_context: Optional industry context from Industry Agent
+
     Returns:
         TDP dict with customer analysis
     """
-    # Check cache first
     cached = await get_tdp("customer", customer_url)
     if cached:
         return cached
 
     logger.info(f"Building Customer TDP for: {customer_url}")
 
+    # ── Step 1: Firecrawl scrape + interact (if available) ──────────────────
+    scraped_homepage = ""
+    scraped_subpages = ""
+
+    if firecrawl.is_available():
+        logger.info(f"[CustomerAgent] Firecrawl active — scraping {customer_url}")
+        scraped_homepage = await firecrawl.scrape_page(customer_url) or ""
+
+        # Interact to navigate to team and careers pages in one session
+        scraped_subpages = await firecrawl.interact_extract_pages(
+            base_url=customer_url,
+            page_hints=[
+                "team, leadership, or about us page — extract all staff names and titles",
+                "careers or jobs page — extract open roles and required technologies",
+            ],
+        )
+        logger.info(
+            f"[CustomerAgent] Firecrawl complete — "
+            f"homepage={len(scraped_homepage)}c subpages={len(scraped_subpages)}c"
+        )
+
+    # ── Step 2: Build context block for the LLM ─────────────────────────────
+    scraped_block = ""
+    if scraped_homepage or scraped_subpages:
+        parts = []
+        if scraped_homepage:
+            parts.append(f"=== HOMEPAGE (scraped) ===\n{scraped_homepage}")
+        if scraped_subpages:
+            parts.append(f"=== SUB-PAGES (scraped via browser) ===\n{scraped_subpages}")
+        scraped_block = (
+            "\n\nSCRAPED CONTENT — treat as ground truth:\n"
+            + "\n\n".join(parts)
+        )
+
     industry_section = ""
     if industry_context:
-        industry_section = f"""
-The company operates in: {industry_context}
-Use this industry context to inform your research — look for industry-specific pain points and technology patterns."""
+        industry_section = f"\nThe company operates in: {industry_context}\n"
 
-    user_prompt = f"""Research and build a complete Customer Targeted Decomposition Profile for the company at: {customer_url}
-{industry_section}
+    user_prompt = f"""Research and build a complete Customer Targeted Decomposition Profile for: {customer_url}
+{industry_section}{scraped_block}
 
-Search the web for:
-1. Their website — what do they actually do, sell, or service?
-2. LinkedIn company page — employee count, recent hires, leadership
-3. Job postings — what roles are they hiring for? What tech skills do they require?
-4. Google reviews, BBB, Glassdoor — what do customers and employees say?
-5. News articles, press releases — any recent announcements?
-6. Public records — any evidence of expansion, permits, filings?
-7. Social media — what are they posting about? What does their activity reveal?
+{"Use web search to fill gaps not covered by the scraped content above." if scraped_block else "Use web search extensively:"}
+1. {"Any leadership or team members not visible in scraped content" if scraped_block else "Company website — what do they do?"}
+2. LinkedIn company page — employee count, recent hires
+3. {"News, funding, expansion signals" if scraped_block else "Job postings — what tech skills do they require?"}
+4. Google reviews, BBB, Glassdoor — customer and employee sentiment
+5. {"Social media and public records" if scraped_block else "News articles, press releases, public records"}
 
-Be thorough but honest. Flag anything you couldn't verify. A sales rep needs to trust this data."""
+Be thorough but honest. Flag anything you couldn't verify."""
 
     result = await call_llm_json(
         system_prompt=SYSTEM_PROMPT,
@@ -116,7 +156,6 @@ Be thorough but honest. Flag anything you couldn't verify. A sales rep needs to 
         max_tokens=6000,
     )
 
-    # Store in cache
     tdp = await store_tdp(
         tdp_type="customer",
         identifier=customer_url,
