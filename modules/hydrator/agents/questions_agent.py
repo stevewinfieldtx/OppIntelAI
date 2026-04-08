@@ -1,7 +1,12 @@
 """
 Questions Agent
-Generates discovery questions, expected answers, objection handling,
-and pivot strategies based on all prior intelligence.
+Generates discovery questions, expected answers, and objection handling
+based on all prior intelligence.
+
+Email drafting is intentionally NOT part of this agent.
+Emails are generated on-demand via /api/v1/contact/draft AFTER
+the contact is looked up via Apollo and optionally profiled via CPP.
+This ensures every email is shaped by who is actually receiving it.
 """
 import json
 import logging
@@ -57,11 +62,6 @@ Return your output as JSON with this exact structure:
             "bridge_to": "Where to steer the conversation after handling the objection"
         }
     ],
-    "email_draft": {
-        "subject_line": "Email subject if channel is email or for follow-up",
-        "body": "Full email body — personalized, concise, with a specific call-to-action",
-        "ps_hook": "A P.S. line with a provocative question or insight"
-    },
     "conversation_exit": {
         "success_signal": "How the rep knows the call is going well",
         "next_step_ask": "The specific next step to propose",
@@ -80,21 +80,6 @@ async def run(
     need_analysis: dict,
     contact_title: str = "",
 ) -> dict:
-    """
-    Generate the conversation toolkit based on all prior intelligence.
-    
-    Args:
-        solution_tdp: Solution TDP data
-        industry_tdp: Industry TDP data
-        customer_tdp: Customer TDP data
-        need_analysis: Output from Need ID Agent
-        contact_title: Optional title of the person being contacted
-        
-    Returns:
-        Discovery questions, objection handling, and scripts
-    """
-    logger.info("Generating conversation toolkit")
-
     sol_data = solution_tdp.get("data", solution_tdp)
     ind_data = industry_tdp.get("data", industry_tdp)
     cust_data = customer_tdp.get("data", customer_tdp)
@@ -104,7 +89,7 @@ async def run(
     if contact_title:
         title_context = f"""
 The sales rep will be speaking with someone whose title is: {contact_title}
-Tailor all questions, tone, and approach to this specific role. A CFO cares about different things than an IT Director."""
+Tailor all questions, tone, and approach to this specific role."""
 
     user_prompt = f"""Generate a complete conversation toolkit for a sales rep approaching this prospect.
 {title_context}
@@ -123,12 +108,11 @@ Tailor all questions, tone, and approach to this specific role. A CFO cares abou
 
 Generate:
 1. OPENING APPROACH: How to start the conversation with maximum credibility
-2. DISCOVERY QUESTIONS: 4-6 questions with full answer trees (positive/negative/unexpected responses with pivots for each)
+2. DISCOVERY QUESTIONS: 4-6 questions with full answer trees
 3. OBJECTION PLAYBOOK: The 3-5 most likely objections with word-for-word responses
-4. EMAIL DRAFT: A personalized outreach email they could send
-5. EXIT STRATEGY: How to close the call successfully or gracefully disengage
+4. EXIT STRATEGY: How to close the call successfully or gracefully disengage
 
-Every element must reference specific details from the intelligence profiles. The rep should feel like they have an unfair advantage walking into this conversation."""
+Every element must reference specific details from the intelligence profiles."""
 
     result = await call_llm_json(
         system_prompt=SYSTEM_PROMPT,
